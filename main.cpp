@@ -14,7 +14,7 @@ public:
     }
 
     ~Session() {
-        std::cout << "Session destroy" << std::endl;
+        std::cout << "Session destroy: " << session_socket.remote_endpoint() << std::endl;
     }
 
     void createSession() {
@@ -26,6 +26,9 @@ public:
             {
                 if (!errorcode) {
                     std::cout << &this_session->buffer;
+                    this_session->createSession();
+                } else if (errorcode == basio::error::eof) {
+                    std::cout << "Connection has broken" << std::endl;
                 }
             }
         );
