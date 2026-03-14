@@ -11,6 +11,8 @@ namespace bsystem = boost::system;
 class Session: public std::enable_shared_from_this<Session> {
 public:
     std::function<void(std::shared_ptr<Session>)> on_leave;
+    std::function<void(std::shared_ptr<Session>, std::string&)> on_chat_message;
+    bip::tcp::socket session_socket;
 
     Session(bip::tcp::socket&& mv_socket) : session_socket(std::move(mv_socket)) {
         std::cout << "Session initialized..." << std::endl;
@@ -28,7 +30,12 @@ public:
             [this_session = shared_from_this()](bsystem::error_code errorcode, std::size_t bytes_transf)
             {
                 if (!errorcode) {
-                    std::cout << &this_session->buffer;
+                    std::string msg;
+                    std::istream b_str(&this_session->buffer);
+                    
+                    std::getline(b_str, msg);
+                    msg += '\n';
+                    this_session->on_chat_message(this_session, msg);
                     this_session->createSession();
                 } else if (errorcode == basio::error::eof) {
                     std::cout << "Connection has broken" << std::endl;
@@ -51,7 +58,6 @@ public:
     }
 
 private:
-    bip::tcp::socket session_socket;
     basio::streambuf buffer;
 };
 
@@ -72,6 +78,11 @@ public:
                 nsession->on_leave = [&](std::shared_ptr<Session> s) {
                     this->remove_session(s);
                 };
+
+                nsession->on_chat_message = [&](std::shared_ptr<Session> sender, std::string& message) {
+                    send_chat_msg(sender, message);
+                };
+
                 sessions.push_back(nsession);
                 std::cout << "Online: " << sessions.size() << std::endl;
                 nsession->createSession();
@@ -104,6 +115,17 @@ private:
             std::cout << "Connection removed... (Online: " << sessions.size() << ")" << std::endl;
         }
     }
+
+    void send_chat_msg(std::shared_ptr<Session> sender, std::string& message) {
+        for (auto& user : sessions) {
+            if (user != sender) {
+                std::stringstream r_message;
+                r_message << sender->session_socket.remote_endpoint() << ": " << message;
+
+                user->sendMessage(r_message.str());
+            }
+        }
+    }
 };
 
 int main()  
@@ -112,6 +134,6 @@ int main()
     int port = 4051;
     Server server(context, port);
     server.asc_acceptor();
-
+    std::cout << "Start..." << std::endl;
     context.run();
 }
