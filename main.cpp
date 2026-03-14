@@ -1,6 +1,8 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <memory>
+#include <vector>
+#include <functional>
 
 namespace bip = boost::asio::ip;
 namespace basio = boost::asio;
@@ -8,7 +10,8 @@ namespace bsystem = boost::system;
 
 class Session: public std::enable_shared_from_this<Session> {
 public:
-    
+    std::function<void(std::shared_ptr<Session>)> on_leave;
+
     Session(bip::tcp::socket&& mv_socket) : session_socket(std::move(mv_socket)) {
         std::cout << "Session initialized..." << std::endl;
     }
@@ -29,9 +32,22 @@ public:
                     this_session->createSession();
                 } else if (errorcode == basio::error::eof) {
                     std::cout << "Connection has broken" << std::endl;
+                    this_session->on_leave(this_session);
                 }
             }
         );
+    }
+
+    void sendMessage(const std::string& msg) {
+        basio::async_write(session_socket, basio::buffer(msg), 
+        [this_session = shared_from_this(), c_msg = msg](bsystem::error_code ec, std::size_t bytes) {
+            
+            if(!ec) {
+                std::cout << "Succes send message..." << std::endl;
+            } else {
+                std::cout << ec.message();
+            }
+        });
     }
 
 private:
@@ -53,8 +69,21 @@ public:
         {   
             if (!errorcode) {
                 std::shared_ptr<Session> nsession = std::make_shared<Session>(std::move(socket));
+                nsession->on_leave = [&](std::shared_ptr<Session> s) {
+                    this->remove_session(s);
+                };
+                sessions.push_back(nsession);
+                std::cout << "Online: " << sessions.size() << std::endl;
                 nsession->createSession();
-        
+
+                nsession->sendMessage("Hello user, online: " + std::to_string(sessions.size()) + "\n");
+
+                for (auto& user : sessions) {
+                    if (user != nsession) {
+                        user->sendMessage("New user in chat!\n");
+                    }
+                }
+
                 asc_acceptor();
             } else {
                 std::cout << errorcode.message();
@@ -66,6 +95,15 @@ private:
     int port;
     bip::tcp::socket socket;
     bip::tcp::acceptor acceptor;
+    std::vector<std::shared_ptr<Session>> sessions;
+
+    void remove_session(std::shared_ptr<Session> s) {
+        auto rv = std::find(sessions.begin(), sessions.end(), s);
+        if (rv != sessions.end()) {
+            sessions.erase(rv);
+            std::cout << "Connection removed... (Online: " << sessions.size() << ")" << std::endl;
+        }
+    }
 };
 
 int main()  
